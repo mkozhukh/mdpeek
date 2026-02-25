@@ -1,0 +1,23 @@
+{
+  "name": "mdpeek",
+  "version": "1.0.0",
+  "type": "module",
+  "author": "Maksim Kozhukh",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mkozhukh/mdpeek.git"
+  },
+  "homepage": "https://github.com/mkozhukh/mdpeek",
+  "bugs": {
+    "url": "https://github.com/mkozhukh/mdpeek/issues"
+  },
+  "bin": {
+    "mdpeek": "./cli.js"
+  },
+  "dependencies": {
+    "marked": "^15.0.0",
+    "marked-highlight": "^2.2.0",
+    "highlight.js": "^11.11.0"
+  }
+}
