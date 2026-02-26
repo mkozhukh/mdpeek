@@ -1,10 +1,14 @@
 import { resolve, join } from "path";
 import { renderMarkdown } from "./render.js";
 import { walkDir, buildNav, layout, findFirstMdFile } from "./layout.js";
+import { loadSidebar, buildSidebarTree, buildLabelMap } from "./sidebar-loader.js";
 import { statSync } from "fs";
 
 export async function startServer(srcDir, port = 3000) {
   const rootDir = resolve(srcDir);
+  const sidebarConfig = loadSidebar(rootDir);
+  const sidebarTree = sidebarConfig ? buildSidebarTree(sidebarConfig, rootDir) : null;
+  const labelMap = sidebarTree ? buildLabelMap(sidebarTree) : null;
 
   let server;
   let actualPort = port;
@@ -14,7 +18,7 @@ export async function startServer(srcDir, port = 3000) {
       server = Bun.serve({
         port: actualPort,
         async fetch(req) {
-          return handleRequest(req, rootDir);
+          return handleRequest(req, rootDir, sidebarTree, labelMap);
         },
       });
       break;
@@ -38,13 +42,13 @@ export async function startServer(srcDir, port = 3000) {
   } catch {}
 }
 
-async function handleRequest(req, rootDir) {
+async function handleRequest(req, rootDir, sidebarTree, labelMap) {
   const url = new URL(req.url);
   let pathname = decodeURIComponent(url.pathname);
 
   // Root redirect
   if (pathname === "/") {
-    const tree = walkDir(rootDir);
+    const tree = sidebarTree || walkDir(rootDir);
     const first = findFirstMdFile(tree);
     if (first) {
       return Response.redirect("/" + first, 302);
@@ -65,6 +69,14 @@ async function handleRequest(req, rootDir) {
   try {
     stat = statSync(filePath);
   } catch {
+    // try adding .md extension
+    if (!pathname.endsWith(".md")) {
+      const mdPath = filePath + ".md";
+      try {
+        statSync(mdPath);
+        return Response.redirect(pathname + ".md", 302);
+      } catch {}
+    }
     return new Response("Not found", { status: 404 });
   }
 
@@ -80,7 +92,7 @@ async function handleRequest(req, rootDir) {
       return Response.redirect(mdPath, 302);
     } catch {
       // Directory listing
-      return directoryListing(filePath, rootDir, pathname);
+      return directoryListing(filePath, rootDir, pathname, sidebarTree, labelMap);
     }
   }
 
@@ -88,11 +100,11 @@ async function handleRequest(req, rootDir) {
   if (pathname.endsWith(".md")) {
     try {
       const md = await Bun.file(filePath).text();
-      const contentHtml = renderMarkdown(md);
-      const tree = walkDir(rootDir);
+      const { html: contentHtml, frontMatter } = renderMarkdown(md);
+      const tree = sidebarTree || walkDir(rootDir);
       const activeFile = filePath.slice(rootDir.length + 1);
       const navHtml = buildNav(tree, activeFile);
-      const page = layout(navHtml, contentHtml, activeFile);
+      const page = layout(navHtml, contentHtml, activeFile, { frontMatter });
       return new Response(page, {
         headers: { "content-type": "text/html; charset=utf-8" },
       });
@@ -104,8 +116,8 @@ async function handleRequest(req, rootDir) {
   return new Response("Not found", { status: 404 });
 }
 
-function directoryListing(dirPath, rootDir, pathname) {
-  const tree = walkDir(rootDir);
+function directoryListing(dirPath, rootDir, pathname, sidebarTree, labelMap) {
+  const tree = sidebarTree || walkDir(rootDir);
   const entries = walkDir(rootDir, dirPath);
   const activeFile = "";
   const navHtml = buildNav(tree, activeFile);
@@ -113,12 +125,14 @@ function directoryListing(dirPath, rootDir, pathname) {
   let listing = `<h1>${pathname}</h1><ul>`;
   for (const item of entries) {
     if (item.type === "file") {
-      listing += `<li><a href="/${item.relativePath}">${item.name}</a></li>`;
+      const label = (labelMap && labelMap.get(item.relativePath)) || item.name;
+      listing += `<li><a href="/${item.relativePath}">${label}</a></li>`;
     } else if (item.type === "dir") {
       const dirHref = pathname.endsWith("/")
         ? pathname + item.name
         : pathname + "/" + item.name;
-      listing += `<li><a href="${dirHref}/">${item.name}/</a></li>`;
+      const label = (labelMap && labelMap.get(item.relativePath)) || item.name;
+      listing += `<li><a href="${dirHref}/">${label}/</a></li>`;
     }
   }
   listing += "</ul>";

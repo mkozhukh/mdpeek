@@ -5,6 +5,7 @@
       "name": "mdpeek",
       "dependencies": {
         "highlight.js": "^11.11.0",
+        "highlightjs-svelte": "^1.0.6",
         "marked": "^15.0.0",
         "marked-highlight": "^2.2.0",
       },
@@ -12,6 +13,8 @@
   },
   "packages": {
     "highlight.js": ["highlight.js@11.11.1", "", {}, "sha512-Xwwo44whKBVCYoliBQwaPvtd/2tYFkRQtXDWj1nackaV2JPXx3L0+Jvd8/qCJ2p+ML0/XVkJ2q+Mr+UVdpJK5w=="],
+
+    "highlightjs-svelte": ["highlightjs-svelte@1.0.6", "", {}, "sha512-aXuBPz8df3sOXg90q8rRcBLyxIR8ozPU39a6tJ2rpJUjjd9brRIr55aC0IccW4gsPhQxZ+B3rFugdXsg9/ckDw=="],
 
     "marked": ["marked@15.0.12", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-8dD6FusOQSrpv9Z1rdNMdlSgQOIP880DHqnohobOmYLElGEqAL/JvxvuxZO16r4HtjTlfPRDC1hbvxC9dPN2nA=="],
 

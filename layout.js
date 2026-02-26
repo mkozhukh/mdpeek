@@ -15,7 +15,10 @@ export function walkDir(rootDir, currentDir = rootDir) {
         const hasIndex = children.some(
           (c) => c.type === "file" && c.name === "index.md"
         );
-        items.push({ type: "dir", name, fullPath, children, hasIndex });
+        const relativePath = posix.join(
+          ...fullPath.slice(rootDir.length + 1).split("/")
+        );
+        items.push({ type: "dir", name, fullPath, relativePath, children, hasIndex });
       }
     } else if (name.endsWith(".md")) {
       const relativePath = posix.join(
@@ -38,22 +41,32 @@ export function buildNav(tree, activeFile, { relative = false } = {}) {
   let html = "<ul>";
   for (const item of tree) {
     if (item.type === "dir") {
-      const label = item.name;
-      if (item.hasIndex) {
+      const label = item.label ?? item.name;
+      let indexRelPath = item.indexPath;
+      if (!indexRelPath && item.hasIndex) {
         const indexChild = item.children.find(
           (c) => c.type === "file" && c.name === "index.md"
         );
-        const href = linkFor(indexChild.relativePath, relative);
+        if (indexChild) indexRelPath = indexChild.relativePath;
+      }
+      if (indexRelPath) {
+        const href = linkFor(indexRelPath, relative);
+        html += `<li class="dir"><a href="${href}">${label}</a>`;
+      } else if (item.relativePath) {
+        const href = relative
+          ? "./" + item.relativePath + "/"
+          : "/" + item.relativePath + "/";
         html += `<li class="dir"><a href="${href}">${label}</a>`;
       } else {
         html += `<li class="dir"><span>${label}</span>`;
       }
-      html += buildNav(item.children.filter(c => !(c.type === "file" && c.name === "index.md" && item.hasIndex)), activeFile, { relative });
+      const skipIndex = item.hasIndex && !item.indexPath;
+      html += buildNav(item.children.filter(c => !(c.type === "file" && c.name === "index.md" && skipIndex)), activeFile, { relative });
       html += "</li>";
     } else {
       const active = item.relativePath === activeFile ? ' class="active"' : "";
       const href = linkFor(item.relativePath, relative);
-      html += `<li${active}><a href="${href}">${item.name.replace(/\.md$/, "")}</a></li>`;
+      html += `<li${active}><a href="${href}">${item.label ?? item.name.replace(/\.md$/, "")}</a></li>`;
     }
   }
   html += "</ul>";
@@ -67,8 +80,26 @@ function linkFor(relativePath, relative) {
   return "/" + relativePath;
 }
 
-export function layout(navHtml, contentHtml, activeFile, { relative = false } = {}) {
-  const title = activeFile ? activeFile.replace(/\.md$/, "") : "mdpeek";
+function renderFrontMatter(fm) {
+  if (!fm || Object.keys(fm).length === 0) return null;
+  let dl = "";
+  for (const [k, v] of Object.entries(fm)) {
+    dl += `<dt>${escHtml(k)}</dt><dd>${escHtml(v)}</dd>`;
+  }
+  return { toggle: `<summary class="fm-toggle" title="Front-matter">\u2139\ufe0f</summary>`, block: `<div class="frontmatter"><dl class="fm-body">${dl}</dl></div>` };
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function fmMain(fm, contentHtml) {
+  if (!fm) return `<main><div class="content">${contentHtml}</div></main>`;
+  return `<main><details class="fm-details">${fm.toggle}${fm.block}</details><div class="content">${contentHtml}</div></main>`;
+}
+
+export function layout(navHtml, contentHtml, activeFile, { relative = false, frontMatter = null } = {}) {
+  const title = (frontMatter && frontMatter.title) || (activeFile ? activeFile.replace(/\.md$/, "") : "mdpeek");
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -119,6 +150,7 @@ export function layout(navHtml, contentHtml, activeFile, { relative = false } = 
       flex: 1;
       padding: 40px;
       overflow-y: auto;
+      position: relative;
     }
     .content {
       max-width: 800px;
@@ -163,11 +195,38 @@ export function layout(navHtml, contentHtml, activeFile, { relative = false } = 
     .content img { max-width: 100%; }
     .content hr { border: none; border-top: 1px solid #d0d7de; margin: 2em 0; }
     pre.mermaid { background: transparent; text-align: center; }
+    .fm-toggle {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      cursor: pointer;
+      list-style: none;
+      padding: 4px 8px;
+      color: #57606a;
+      z-index: 1;
+    }
+    .fm-toggle::-webkit-details-marker { display: none; }
+    .frontmatter {
+      max-width: 800px;
+      margin: 0 auto 1em;
+      font-size: 13px;
+      color: #57606a;
+    }
+    .frontmatter .fm-body {
+      background: #f0f1f3;
+      border-radius: 6px;
+      padding: 12px 16px;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .frontmatter .fm-body dt { font-weight: 600; float: left; clear: left; min-width: 100px; margin-right: 8px; }
+    .frontmatter .fm-body dd { margin-left: 0; color: #24292f; }
   </style>
 </head>
 <body>
   <nav>${navHtml}</nav>
-  <main><div class="content">${contentHtml}</div></main>
+  ${fmMain(renderFrontMatter(frontMatter), contentHtml)}
   <script type="module">
     import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
     mermaid.initialize({ startOnLoad: true });

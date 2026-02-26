@@ -1,6 +1,6 @@
 {
   "name": "mdpeek",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "author": "Maksim Kozhukh",
   "license": "MIT",
@@ -16,8 +16,9 @@
     "mdpeek": "./cli.js"
   },
   "dependencies": {
+    "highlight.js": "^11.11.0",
+    "highlightjs-svelte": "^1.0.6",
     "marked": "^15.0.0",
-    "marked-highlight": "^2.2.0",
-    "highlight.js": "^11.11.0"
+    "marked-highlight": "^2.2.0"
   }
 }
