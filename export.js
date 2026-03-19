@@ -1,10 +1,10 @@
 import { resolve, join, dirname } from "path";
 import { readdirSync, statSync, existsSync, mkdirSync } from "fs";
 import { renderMarkdown } from "./render.js";
-import { walkDir, buildNav, layout, findFirstMdFile } from "./layout.js";
+import { walkDir, buildNav, layout, findFirstMdFile, DEFAULT_IGNORE } from "./layout.js";
 import { loadSidebar, buildSidebarTree, collectFilesFromTree, buildLabelMap } from "./sidebar-loader.js";
 
-export async function exportSite(srcDir, outDir) {
+export async function exportSite(srcDir, outDir, ignore = DEFAULT_IGNORE) {
   const rootDir = resolve(srcDir);
   outDir = resolve(outDir);
 
@@ -28,7 +28,7 @@ export async function exportSite(srcDir, outDir) {
   if (sidebarTree) {
     mdFiles = collectFilesFromTree(sidebarTree).map(rel => join(rootDir, rel));
   } else {
-    mdFiles = collectMdFiles(rootDir);
+    mdFiles = collectMdFiles(rootDir, ignore);
   }
 
   if (mdFiles.length === 0) {
@@ -36,7 +36,7 @@ export async function exportSite(srcDir, outDir) {
     return;
   }
 
-  const tree = sidebarTree || walkDir(rootDir);
+  const tree = sidebarTree || walkDir(rootDir, rootDir, ignore);
   const labelMap = sidebarTree ? buildLabelMap(sidebarTree) : null;
   const dirPaths = collectDirPaths(tree, rootDir);
 
@@ -64,7 +64,7 @@ export async function exportSite(srcDir, outDir) {
     const dirFull = join(rootDir, dirRel);
     if (!existsSync(dirFull)) continue;
 
-    const entries = walkDir(rootDir, dirFull);
+    const entries = walkDir(rootDir, dirFull, ignore);
     const relativeToRoot = calculateRelativePath(dirRel + "/index.html");
     const navHtml = buildNavRelative(tree, "", relativeToRoot);
     let listing = `<h1>${dirRel}</h1><ul>`;
@@ -104,15 +104,16 @@ export async function exportSite(srcDir, outDir) {
   console.log(`Exported ${mdFiles.length} file(s) to ${outDir}`);
 }
 
-function collectMdFiles(dir) {
+function collectMdFiles(dir, ignore) {
   const files = [];
   const entries = readdirSync(dir);
   for (const name of entries) {
     if (name.startsWith(".")) continue;
+    if (ignore.has(name)) continue;
     const fullPath = join(dir, name);
     const stat = statSync(fullPath);
     if (stat.isDirectory()) {
-      files.push(...collectMdFiles(fullPath));
+      files.push(...collectMdFiles(fullPath, ignore));
     } else if (name.endsWith(".md")) {
       files.push(fullPath);
     }

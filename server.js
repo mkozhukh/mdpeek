@@ -1,14 +1,34 @@
 import { resolve, join } from "path";
+import { watch } from "fs";
 import { renderMarkdown } from "./render.js";
-import { walkDir, buildNav, layout, findFirstMdFile } from "./layout.js";
+import { walkDir, buildNav, layout, findFirstMdFile, DEFAULT_IGNORE } from "./layout.js";
 import { loadSidebar, buildSidebarTree, buildLabelMap } from "./sidebar-loader.js";
-import { statSync } from "fs";
+import { statSync, readdirSync } from "fs";
 
-export async function startServer(srcDir, port = 3000) {
+export async function startServer(srcDir, port = 3000, ignore = DEFAULT_IGNORE, { watchMode = false } = {}) {
   const rootDir = resolve(srcDir);
   const sidebarConfig = loadSidebar(rootDir);
   const sidebarTree = sidebarConfig ? buildSidebarTree(sidebarConfig, rootDir) : null;
   const labelMap = sidebarTree ? buildLabelMap(sidebarTree) : null;
+
+  const sseClients = new Set();
+
+  if (watchMode) {
+    let debounce;
+    const onChange = (event, filename) => {
+      if (!filename || !filename.endsWith(".md")) return;
+      clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        for (const client of sseClients) {
+          client.enqueue("data: reload\n\n");
+        }
+      }, 150);
+    };
+    const watchDirs = collectWatchDirs(rootDir, ignore);
+    for (const dir of watchDirs) {
+      watch(dir, onChange);
+    }
+  }
 
   let server;
   let actualPort = port;
@@ -17,8 +37,9 @@ export async function startServer(srcDir, port = 3000) {
     try {
       server = Bun.serve({
         port: actualPort,
+        idleTimeout: 255,
         async fetch(req) {
-          return handleRequest(req, rootDir, sidebarTree, labelMap);
+          return handleRequest(req, rootDir, sidebarTree, labelMap, ignore, sseClients, watchMode);
         },
       });
       break;
@@ -42,13 +63,38 @@ export async function startServer(srcDir, port = 3000) {
   } catch {}
 }
 
-async function handleRequest(req, rootDir, sidebarTree, labelMap) {
+async function handleRequest(req, rootDir, sidebarTree, labelMap, ignore, sseClients, watchMode) {
   const url = new URL(req.url);
   let pathname = decodeURIComponent(url.pathname);
 
+  if (pathname === "/__reload") {
+    let controller;
+    let keepalive;
+    const stream = new ReadableStream({
+      start(c) {
+        controller = c;
+        sseClients.add(controller);
+        keepalive = setInterval(() => {
+          controller.enqueue(":\n\n");
+        }, 30000);
+      },
+      cancel() {
+        clearInterval(keepalive);
+        sseClients.delete(controller);
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        "connection": "keep-alive",
+      },
+    });
+  }
+
   // Root redirect
   if (pathname === "/") {
-    const tree = sidebarTree || walkDir(rootDir);
+    const tree = sidebarTree || walkDir(rootDir, rootDir, ignore);
     const first = findFirstMdFile(tree);
     if (first) {
       return Response.redirect("/" + first, 302);
@@ -92,7 +138,7 @@ async function handleRequest(req, rootDir, sidebarTree, labelMap) {
       return Response.redirect(mdPath, 302);
     } catch {
       // Directory listing
-      return directoryListing(filePath, rootDir, pathname, sidebarTree, labelMap);
+      return directoryListing(filePath, rootDir, pathname, sidebarTree, labelMap, ignore, watchMode);
     }
   }
 
@@ -101,10 +147,10 @@ async function handleRequest(req, rootDir, sidebarTree, labelMap) {
     try {
       const md = await Bun.file(filePath).text();
       const { html: contentHtml, frontMatter } = renderMarkdown(md);
-      const tree = sidebarTree || walkDir(rootDir);
+      const tree = sidebarTree || walkDir(rootDir, rootDir, ignore);
       const activeFile = filePath.slice(rootDir.length + 1);
       const navHtml = buildNav(tree, activeFile);
-      const page = layout(navHtml, contentHtml, activeFile, { frontMatter });
+      const page = layout(navHtml, contentHtml, activeFile, { frontMatter, watch: watchMode });
       return new Response(page, {
         headers: { "content-type": "text/html; charset=utf-8" },
       });
@@ -116,9 +162,9 @@ async function handleRequest(req, rootDir, sidebarTree, labelMap) {
   return new Response("Not found", { status: 404 });
 }
 
-function directoryListing(dirPath, rootDir, pathname, sidebarTree, labelMap) {
-  const tree = sidebarTree || walkDir(rootDir);
-  const entries = walkDir(rootDir, dirPath);
+function directoryListing(dirPath, rootDir, pathname, sidebarTree, labelMap, ignore, watchMode) {
+  const tree = sidebarTree || walkDir(rootDir, rootDir, ignore);
+  const entries = walkDir(rootDir, dirPath, ignore);
   const activeFile = "";
   const navHtml = buildNav(tree, activeFile);
 
@@ -137,8 +183,23 @@ function directoryListing(dirPath, rootDir, pathname, sidebarTree, labelMap) {
   }
   listing += "</ul>";
 
-  const page = layout(navHtml, listing, "");
+  const page = layout(navHtml, listing, "", { watch: watchMode });
   return new Response(page, {
     headers: { "content-type": "text/html; charset=utf-8" },
   });
+}
+
+function collectWatchDirs(dir, ignore) {
+  const dirs = [dir];
+  for (const name of readdirSync(dir)) {
+    if (name.startsWith(".")) continue;
+    if (ignore.has(name)) continue;
+    const fullPath = join(dir, name);
+    try {
+      if (statSync(fullPath).isDirectory()) {
+        dirs.push(...collectWatchDirs(fullPath, ignore));
+      }
+    } catch {}
+  }
+  return dirs;
 }

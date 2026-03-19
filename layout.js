@@ -1,16 +1,19 @@
 import { readdirSync, statSync } from "fs";
 import { join, posix } from "path";
 
-export function walkDir(rootDir, currentDir = rootDir) {
+export const DEFAULT_IGNORE = new Set(["node_modules", "dist", "build", "out"]);
+
+export function walkDir(rootDir, currentDir = rootDir, ignore = DEFAULT_IGNORE) {
   const entries = readdirSync(currentDir);
   const items = [];
 
   for (const name of entries) {
     if (name.startsWith(".")) continue;
+    if (ignore.has(name)) continue;
     const fullPath = join(currentDir, name);
     const stat = statSync(fullPath);
     if (stat.isDirectory()) {
-      const children = walkDir(rootDir, fullPath);
+      const children = walkDir(rootDir, fullPath, ignore);
       if (children.length > 0) {
         const hasIndex = children.some(
           (c) => c.type === "file" && c.name === "index.md"
@@ -98,7 +101,7 @@ function fmMain(fm, contentHtml) {
   return `<main><details class="fm-details">${fm.toggle}${fm.block}</details><div class="content">${contentHtml}</div></main>`;
 }
 
-export function layout(navHtml, contentHtml, activeFile, { relative = false, frontMatter = null } = {}) {
+export function layout(navHtml, contentHtml, activeFile, { relative = false, frontMatter = null, watch = false } = {}) {
   const title = (frontMatter && frontMatter.title) || (activeFile ? activeFile.replace(/\.md$/, "") : "mdpeek");
   return `<!DOCTYPE html>
 <html lang="en">
@@ -230,7 +233,8 @@ export function layout(navHtml, contentHtml, activeFile, { relative = false, fro
   <script type="module">
     import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
     mermaid.initialize({ startOnLoad: true });
-  </script>
+  </script>${watch ? `
+  <script>new EventSource("/__reload").onmessage = () => location.reload();</script>` : ""}
 </body>
 </html>`;
 }
